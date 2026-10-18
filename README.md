@@ -1,0 +1,277 @@
+# ExiaPine
+
+TradingView Pine Script，由 `PAQuant 自营图表 Fork v13.0` 重命名而来。
+
+## 脚本说明
+
+- 主图叠加显示日/周/月级别的开盘、最高、最低、收盘关键位。
+- 支持夜盘高低点、昨日美盘 POC、历史最高价（ATH）。
+- 提供本周期、15 分钟、60 分钟三档 EMA20 跨周期叠加。
+- 副图显示 Standard ATR、Bull ATR、Bear ATR。
+- 默认时区为 `America/New_York`，可在设置面板中切换。
+
+## 脚本内容
+
+```pine
+//@version=6
+indicator("ExiaPine", overlay = true)
+
+// ==========================================
+// Forked from: PAQuant 自营图表 (时间戳无缝对齐·绝不压扁·夜盘美POC完整版) v12.0
+// EMA 模块移植自: Price Action All In One (fengyangsi)
+// ==========================================
+
+// ==========================================
+// 1. 控制面板
+// ==========================================
+// --- 时区与环境设置 ---
+tz_option  = input.string("America/New_York", title="时间段基准时区", options=["America/New_York", "Asia/Shanghai", "UTC", "交易所默认(Exchange)"], group="基础与时区设置", tooltip="美股/外盘期货请选 America/New_York；国内期货请选 Asia/Shanghai")
+tz_string  = tz_option == "交易所默认(Exchange)" ? syminfo.timezone : tz_option
+
+show_d   = input.bool(true,  title="显示 日线级 水平线 (D)", group="常规水平线设置")
+show_w   = input.bool(true,  title="显示 周线级 水平线 (W)", group="常规水平线设置")
+show_m   = input.bool(true,  title="显示 月线级 水平线 (M)", group="常规水平线设置")
+show_ath = input.bool(false, title="★ 显示 历史最高价 (ATH)", group="常规水平线设置")
+
+// --- 夜盘设置 (默认按美东时间 18:00-09:30 为隔夜盘) ---
+show_night = input.bool(true, title="显示 夜盘 高/低点", group="夜盘设置")
+night_sess = input.session("1800-0930:1234567", title="夜盘时间段 (按上述时区)", group="夜盘设置", tooltip="美盘期货(NQ/ES): NY时区设 1800-0930；国内期货: BJ时区设 2100-0230")
+
+// --- 美盘 POC 设置 (默认按美东时间 09:30-16:00 为美盘 RTH) ---
+show_us_poc = input.bool(true, title="显示 昨日美盘 POC", group="美盘 POC 设置")
+us_sess     = input.session("0930-1600:1234567", title="美盘时间段 (按上述时区)", group="美盘 POC 设置", tooltip="美盘期货(NQ/ES): NY时区设 0930-1600；若按BJ时区设 2130-0400")
+poc_ticks   = input.int(5, title="POC 价格精度 (Ticks/步长)", minval=1, group="美盘 POC 设置")
+
+// --- 跨周期 EMA 核心参数 (PAIO 高周期 EMA20 移植) ---
+show_emas    = input.bool(true,  title="显示 跨周期 EMA", group="EMA 设置")
+
+// 1st EMA (当前周期)
+ma_1_use =       input.bool(defval = true, title = '本周期 EMA20', inline = 'ma_1_1', group = 'EMA 设置')
+ma_1_length =    input.int(defval = 20, minval = 0, title = 'Length', inline = 'ma_1_1', group = 'EMA 设置', display = display.none)
+ma_1_offset =    input.int(defval = 0, title = 'Offset', inline = 'ma_1_1', group = 'EMA 设置', display = display.none)
+ma_1_timeframe = input.timeframe(defval = '', title = 'Timeframe', inline = 'ma_1_2', group = 'EMA 设置', display = display.none)
+ma_1_source =    input.source(defval = close, title = 'Source', inline = 'ma_1_2', group = 'EMA 设置', display = display.none)
+
+// 2nd EMA (15M)
+ma_2_use =       input.bool(defval = true, title = '15M EMA20', inline = 'ma_2_1', group = 'EMA 设置')
+ma_2_length =    input.int(defval = 20, minval = 0, title = 'Length', inline = 'ma_2_1', group = 'EMA 设置', display = display.none)
+ma_2_offset =    input.int(defval = 0, title = 'Offset', inline = 'ma_2_1', group = 'EMA 设置', display = display.none)
+ma_2_timeframe = input.timeframe(defval = '15', title = 'Timeframe', inline = 'ma_2_2', group = 'EMA 设置', display = display.none)
+ma_2_source =    input.source(defval = close, title = 'Source', inline = 'ma_2_2', group = 'EMA 设置', display = display.none)
+
+// 3rd EMA (60M)
+ma_3_use =       input.bool(defval = true, title = '60M EMA20', inline = 'ma_3_1', group = 'EMA 设置')
+ma_3_length =    input.int(defval = 20, minval = 0, title = 'Length', inline = 'ma_3_1', group = 'EMA 设置', display = display.none)
+ma_3_offset =    input.int(defval = 0, title = 'Offset', inline = 'ma_3_1', group = 'EMA 设置', display = display.none)
+ma_3_timeframe = input.timeframe(defval = '60', title = 'Timeframe', inline = 'ma_3_2', group = 'EMA 设置', display = display.none)
+ma_3_source =    input.source(defval = close, title = 'Source', inline = 'ma_3_2', group = 'EMA 设置', display = display.none)
+
+// --- ATR 参数 ---
+show_atr    = input.bool(true,  title="显示多空 ATR 副图", group="ATR 设置")
+atrLength   = input.int(14, title="ATR 统计周期", minval=1, group="ATR 设置")
+
+// ==========================================
+// 2. 局部渲染函数
+// ==========================================
+render_level(l_id, lbl_id, val, col, width, txt, is_enabled) =>
+    if is_enabled and not na(val) and barstate.islast
+        line.set_xy1(l_id, bar_index - 30, val)
+        line.set_xy2(l_id, bar_index + 12, val)
+        line.set_extend(l_id, extend.none)
+        line.set_color(l_id, col)
+        line.set_width(l_id, width)
+        line.set_style(l_id, line.style_solid)
+
+        label.set_xy(lbl_id, bar_index + 14, val)
+        label.set_text(lbl_id, txt + " " + str.tostring(val, format.mintick))
+        label.set_textcolor(lbl_id, col)
+        label.set_style(lbl_id, label.style_none)
+        label.set_textalign(lbl_id, text.align_left)
+    else
+        line.set_color(l_id, color.new(color.white, 100))
+        label.set_textcolor(lbl_id, color.new(color.white, 100))
+
+// ==========================================
+// 3. 全时段 (ETH) 跨域数据提取算法
+// ==========================================
+ext_symbol = ticker.new(syminfo.prefix, syminfo.ticker, session.extended)
+
+// --- A. 常规 D/W/M 级高低开收 (直接取上一周期 [1]，彻底解决回放失效) ---
+[y_o, y_h, y_l, y_c] = request.security(ext_symbol, "D", [open[1], high[1], low[1], close[1]], gaps = barmerge.gaps_off)
+[w_o, w_h, w_l, w_c] = request.security(ext_symbol, "W", [open[1], high[1], low[1], close[1]], gaps = barmerge.gaps_off)
+[m_o, m_h, m_l, m_c] = request.security(ext_symbol, "M", [open[1], high[1], low[1], close[1]], gaps = barmerge.gaps_off)
+
+// --- B. 夜盘与 POC 强行基于 5 分钟 ETH 数据流计算（避开 RTH 裁剪） ---
+f_calc_intraday_levels(_night_sess, _us_sess, _poc_ticks, _tz) =>
+    // 强制指定 5 分钟采样粒度，保证 24 小时全覆盖
+    string _calc_tf = "5"
+
+    // 1. 夜盘高低点锁存算法
+    _in_night = not na(time(_calc_tf, _night_sess, _tz))
+    var float _live_nh = na, var float _live_nl = na
+    var float _last_completed_nh = na, var float _last_completed_nl = na
+
+    if _in_night
+        if not _in_night[1] // 新一轮夜盘开启
+            if not na(_live_nh)
+                _last_completed_nh := _live_nh
+                _last_completed_nl := _live_nl
+            _live_nh := high
+            _live_nl := low
+        else
+            _live_nh := math.max(nz(_live_nh, high), high)
+            _live_nl := math.min(nz(_live_nl, low), low)
+    else if _in_night[1] // 夜盘刚好结束（09:30），锁存最终夜高夜低
+        _last_completed_nh := _live_nh
+        _last_completed_nl := _live_nl
+
+    // 夜盘期间显示实时动态值；白天/RTH 期间强行锁定已结算值
+    float _out_nh = _in_night ? _live_nh : _last_completed_nh
+    float _out_nl = _in_night ? _live_nl : _last_completed_nl
+
+    // 2. 美盘 POC 计算 (Volume Profile 简化算法)
+    _in_us = not na(time(_calc_tf, _us_sess, _tz))
+    var float _live_poc = na
+    var float _last_completed_poc = na
+    var array<float> _prices = array.new_float(0)
+    var array<float> _vols   = array.new_float(0)
+
+    if _in_us
+        if not _in_us[1] // 新美盘开盘，重置容器
+            _prices := array.new_float(0)
+            _vols   := array.new_float(0)
+            _live_poc := na
+
+        float _v_part = volume / 4.0
+        float _step   = syminfo.mintick * _poc_ticks
+        float _p_o = math.round(open  / _step) * _step
+        float _p_h = math.round(high  / _step) * _step
+        float _p_l = math.round(low   / _step) * _step
+        float _p_c = math.round(close / _step) * _step
+
+        array<float> _pts = array.new_float(4)
+        array.set(_pts, 0, _p_o)
+        array.set(_pts, 1, _p_h)
+        array.set(_pts, 2, _p_l)
+        array.set(_pts, 3, _p_c)
+
+        for _i = 0 to 3
+            float _pt = array.get(_pts, _i)
+            int _idx  = array.indexof(_prices, _pt)
+            if _idx != -1
+                array.set(_vols, _idx, array.get(_vols, _idx) + _v_part)
+            else
+                array.push(_prices, _pt)
+                array.push(_vols, _v_part)
+
+        if array.size(_vols) > 0
+            int _m_idx = array.indexof(_vols, array.max(_vols))
+            if _m_idx != -1
+                _live_poc := array.get(_prices, _m_idx)
+    else if _in_us[1] // 美盘收盘（16:00）
+        if not na(_live_poc)
+            _last_completed_poc := _live_poc
+
+    // 输出已结算的美盘 POC
+    float _out_poc = nz(_last_completed_poc, _live_poc)
+
+    [_out_nh, _out_nl, _out_poc]
+
+// 跨域使用 "5" 分钟全时段 (ETH) 抓取数据
+[night_h, night_l, last_us_poc] = request.security(ext_symbol, "5", f_calc_intraday_levels(night_sess, us_sess, poc_ticks, tz_string), gaps = barmerge.gaps_off)
+
+// 历史最高价
+ath = ta.highest(high, bar_index + 1)
+
+// ==========================================
+// 4. 图形对象初始化与渲染
+// ==========================================
+var l_yo = line.new(na,na,na,na), var lbl_yo = label.new(na,na,"")
+var l_yh = line.new(na,na,na,na), var lbl_yh = label.new(na,na,"")
+var l_yl = line.new(na,na,na,na), var lbl_yl = label.new(na,na,"")
+var l_yc = line.new(na,na,na,na), var lbl_yc = label.new(na,na,"")
+
+var l_wo = line.new(na,na,na,na), var lbl_wo = label.new(na,na,"")
+var l_wh = line.new(na,na,na,na), var lbl_wh = label.new(na,na,"")
+var l_wl = line.new(na,na,na,na), var lbl_wl = label.new(na,na,"")
+var l_wc = line.new(na,na,na,na), var lbl_wc = label.new(na,na,"")
+
+var l_mo = line.new(na,na,na,na), var lbl_mo = label.new(na,na,"")
+var l_mh = line.new(na,na,na,na), var lbl_mh = label.new(na,na,"")
+var l_ml = line.new(na,na,na,na), var lbl_ml = label.new(na,na,"")
+var l_mc = line.new(na,na,na,na), var lbl_mc = label.new(na,na,"")
+
+var l_nh  = line.new(na,na,na,na), var lbl_nh  = label.new(na,na,"")
+var l_nl  = line.new(na,na,na,na), var lbl_nl  = label.new(na,na,"")
+var l_poc = line.new(na,na,na,na), var lbl_poc = label.new(na,na,"")
+var l_ath = line.new(na,na,na,na), var lbl_ath = label.new(na,na,"")
+
+render_level(l_yo, lbl_yo, y_o, color.new(#b2b5be, 40), 1, "日开", show_d)
+render_level(l_yh, lbl_yh, y_h, color.new(#ff5252, 40), 1, "日高", show_d)
+render_level(l_yl, lbl_yl, y_l, color.new(#00e676, 40), 1, "日低", show_d)
+render_level(l_yc, lbl_yc, y_c, color.new(#2196f3, 40), 1, "日收", show_d)
+
+render_level(l_wo, lbl_wo, w_o, color.new(#787b86, 0),  2, "周开", show_w)
+render_level(l_wh, lbl_wh, w_h, color.new(#e040fb, 0),  2, "周高", show_w)
+render_level(l_wl, lbl_wl, w_l, color.new(#00b0ff, 0),  2, "周低", show_w)
+render_level(l_wc, lbl_wc, w_c, color.new(#00e5ff, 0),  2, "周收", show_w)
+
+render_level(l_mo, lbl_mo, m_o, color.new(#ff9100, 0),  2, "月开", show_m)
+render_level(l_mh, lbl_mh, m_h, color.new(#ff1744, 0),  2, "月高", show_m)
+render_level(l_ml, lbl_ml, m_l, color.new(#00e676, 0),  2, "月低", show_m)
+render_level(l_mc, lbl_mc, m_c, color.new(#2979ff, 0),  2, "月收", show_m)
+
+render_level(l_nh,  lbl_nh,  night_h,     color.new(#ff4081, 0), 1, "夜高", show_night)
+render_level(l_nl,  lbl_nl,  night_l,     color.new(#69f0ae, 0), 1, "夜低", show_night)
+render_level(l_poc, lbl_poc, last_us_poc, color.new(#ffd600, 0), 2, "美POC", show_us_poc)
+
+render_level(l_ath, lbl_ath, ath, color.new(#ffd600, 0), 3, "★ ATH", show_ath)
+
+// ==========================================
+// 5. 主图模块：跨周期 EMA (PAIO 移植，高周期 EMA20 落到低周期)
+// ==========================================
+ma_1_request = request.security(symbol = syminfo.tickerid, timeframe = ma_1_timeframe, expression = ta.ema(ma_1_source, ma_1_length), gaps = barmerge.gaps_on)
+var float ma_1_last = na
+var float ma_1_value = na
+if na(ma_1_request)
+    ma_1_value := (ma_1_source - ma_1_last) * (2 / (ma_1_length + 1)) + ma_1_last
+else
+    ma_1_value := ma_1_request
+    ma_1_last := ma_1_value
+plot(series = ma_1_use and show_emas ? ma_1_value : na, title = '本周期 EMA20', color = color.new(#9daaff, 30), linewidth = 1, style = plot.style_line, offset = ma_1_offset)
+
+ma_2_request = request.security(symbol = syminfo.tickerid, timeframe = ma_2_timeframe, expression = ta.ema(ma_2_source, ma_2_length), gaps = barmerge.gaps_on)
+var float ma_2_last = na
+var float ma_2_value = na
+if na(ma_2_request)
+    ma_2_value := (ma_2_source - ma_2_last) * (2 / (ma_2_length + 1)) + ma_2_last
+else
+    ma_2_value := ma_2_request
+    ma_2_last := ma_2_value
+plot(series = ma_2_use and show_emas ? ma_2_value : na, title = '15M EMA20', color = color.new(#ff7043, 0), linewidth = 2, style = plot.style_line, offset = ma_2_offset)
+
+ma_3_request = request.security(symbol = syminfo.tickerid, timeframe = ma_3_timeframe, expression = ta.ema(ma_3_source, ma_3_length), gaps = barmerge.gaps_on)
+var float ma_3_last = na
+var float ma_3_value = na
+if na(ma_3_request)
+    ma_3_value := (ma_3_source - ma_3_last) * (2 / (ma_3_length + 1)) + ma_3_last
+else
+    ma_3_value := ma_3_request
+    ma_3_last := ma_3_value
+plot(series = ma_3_use and show_emas ? ma_3_value : na, title = '60M EMA20', color = color.new(#d500f9, 0), linewidth = 2, style = plot.style_line, offset = ma_3_offset)
+
+// ==========================================
+// 6. 副图模块：多空非对称 ATR
+// ==========================================
+standardTR = ta.tr(true)
+bullTR     = math.max(0.0, high - high[1])
+bearTR     = math.max(0.0, low[1] - low)
+
+final_ATR     = ta.rma(standardTR, atrLength)
+final_BullATR = ta.rma(bullTR, atrLength)
+final_BearATR = ta.rma(bearTR, atrLength)
+
+plot(show_atr ? final_ATR : na,     title="Standard ATR", color=color.new(color.gray, 30), linewidth=2, force_overlay=false)
+plot(show_atr ? final_BullATR : na, title="Bull ATR",     color=color.new(#00e676, 0),    linewidth=1, force_overlay=false)
+plot(show_atr ? final_BearATR : na, title="Bear ATR",     color=color.new(#ff5252, 0),    linewidth=1, force_overlay=false)
+```
