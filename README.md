@@ -6,7 +6,7 @@ TradingView Pine Script，由 `PAQuant 自营图表 Fork v13.0` 重命名而来�
 
 - 主图叠加显示日/周/月级别的开盘、最高、最低、收盘关键位。
 - 支持夜盘高低点、历史最高价（ATH）。
-- 成交量分布支持三种可勾选区间：昨日开盘 → 当前 K 线、今日开盘 → 当前 K 线、任意时间 → 当前 K 线；每个区间输出 POC、70% VAH、70% VAL，并以折线形式绘制在每根 K 线上。
+- 成交量分布支持三种可勾选区间：昨日开盘 → 当前 K 线、今日开盘 → 当前 K 线、任意时间 → 当前 K 线；每个区间输出 POC、70% VAH、70% VAL，并以折线形式绘制在每根 K 线上。其中 POC 为实线，VAH 为阶梯线，VAL 为圆点标记。
 - 提供本周期、15 分钟、60 分钟三档 EMA20 跨周期叠加。
 - 副图显示 Standard ATR、Bull ATR、Bear ATR。
 - 默认时区为 `America/New_York`，可在设置面板中切换。
@@ -291,14 +291,14 @@ render_level(l_mc, lbl_mc, m_c, color.new(#2979ff, 0),  2, "月收", show_m)
 render_level(l_nh,  lbl_nh,  night_h,     color.new(#ff4081, 0), 1, "夜高", show_night)
 render_level(l_nl,  lbl_nl,  night_l,     color.new(#69f0ae, 0), 1, "夜低", show_night)
 plot(series = show_vp_prev ? vp_prev_poc : na, title = "昨开POC", color = color.new(#ffb300, 0), linewidth = 3, style = plot.style_line)
-plot(series = show_vp_prev ? vp_prev_vah : na, title = "昨开VAH", color = color.new(#ffb300, 0), linewidth = 2, style = plot.style_line)
-plot(series = show_vp_prev ? vp_prev_val : na, title = "昨开VAL", color = color.new(#ffb300, 0), linewidth = 2, style = plot.style_line)
+plot(series = show_vp_prev ? vp_prev_vah : na, title = "昨开VAH", color = color.new(#ffb300, 0), linewidth = 2, style = plot.style_stepline)
+plot(series = show_vp_prev ? vp_prev_val : na, title = "昨开VAL", color = color.new(#ffb300, 0), linewidth = 2, style = plot.style_circles)
 plot(series = show_vp_today ? vp_today_poc : na, title = "今开POC", color = color.new(#ffd600, 0), linewidth = 3, style = plot.style_line)
-plot(series = show_vp_today ? vp_today_vah : na, title = "今开VAH", color = color.new(#ffd600, 0), linewidth = 2, style = plot.style_line)
-plot(series = show_vp_today ? vp_today_val : na, title = "今开VAL", color = color.new(#ffd600, 0), linewidth = 2, style = plot.style_line)
+plot(series = show_vp_today ? vp_today_vah : na, title = "今开VAH", color = color.new(#ffd600, 0), linewidth = 2, style = plot.style_stepline)
+plot(series = show_vp_today ? vp_today_val : na, title = "今开VAL", color = color.new(#ffd600, 0), linewidth = 2, style = plot.style_circles)
 plot(series = show_vp_custom ? vp_custom_poc : na, title = "自定义POC", color = color.new(#00e5ff, 0), linewidth = 3, style = plot.style_line)
-plot(series = show_vp_custom ? vp_custom_vah : na, title = "自定义VAH", color = color.new(#00e5ff, 0), linewidth = 2, style = plot.style_line)
-plot(series = show_vp_custom ? vp_custom_val : na, title = "自定义VAL", color = color.new(#00e5ff, 0), linewidth = 2, style = plot.style_line)
+plot(series = show_vp_custom ? vp_custom_vah : na, title = "自定义VAH", color = color.new(#00e5ff, 0), linewidth = 2, style = plot.style_stepline)
+plot(series = show_vp_custom ? vp_custom_val : na, title = "自定义VAL", color = color.new(#00e5ff, 0), linewidth = 2, style = plot.style_circles)
 
 render_level(l_ath, lbl_ath, ath, color.new(#ffd600, 0), 3, "★ ATH", show_ath)
 
