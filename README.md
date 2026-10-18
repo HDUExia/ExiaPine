@@ -5,7 +5,8 @@ TradingView Pine Script，由 `PAQuant 自营图表 Fork v13.0` 重命名而来�
 ## 脚本说明
 
 - 主图叠加显示日/周/月级别的开盘、最高、最低、收盘关键位。
-- 支持夜盘高低点、昨日美盘 POC、历史最高价（ATH）。
+- 支持夜盘高低点、历史最高价（ATH）。
+- 成交量分布（POC）支持三种可勾选区间：昨日开盘 → 当前 K 线、今日开盘 → 当前 K 线、任意时间 → 当前 K 线。
 - 提供本周期、15 分钟、60 分钟三档 EMA20 跨周期叠加。
 - 副图显示 Standard ATR、Bull ATR、Bear ATR。
 - 默认时区为 `America/New_York`，可在设置面板中切换。
@@ -37,10 +38,13 @@ show_ath = input.bool(false, title="★ 显示 历史最高价 (ATH)", group="�
 show_night = input.bool(true, title="显示 夜盘 高/低点", group="夜盘设置")
 night_sess = input.session("1800-0930:1234567", title="夜盘时间段 (按上述时区)", group="夜盘设置", tooltip="美盘期货(NQ/ES): NY时区设 1800-0930；国内期货: BJ时区设 2100-0230")
 
-// --- 美盘 POC 设置 (默认按美东时间 09:30-16:00 为美盘 RTH) ---
-show_us_poc = input.bool(true, title="显示 昨日美盘 POC", group="美盘 POC 设置")
-us_sess     = input.session("0930-1600:1234567", title="美盘时间段 (按上述时区)", group="美盘 POC 设置", tooltip="美盘期货(NQ/ES): NY时区设 0930-1600；若按BJ时区设 2130-0400")
-poc_ticks   = input.int(5, title="POC 价格精度 (Ticks/步长)", minval=1, group="美盘 POC 设置")
+// --- 成交量分布设置 (Volume Profile) ---
+show_vp_prev   = input.bool(true,  title="显示 昨日开盘 → 当前 K 线", group="成交量分布设置")
+show_vp_today  = input.bool(true,  title="显示 今日开盘 → 当前 K 线", group="成交量分布设置")
+show_vp_custom = input.bool(false, title="显示 任意 K 线 → 当前 K 线", group="成交量分布设置")
+vp_day_sess    = input.session("0930-1600:1234567", title="日盘开盘时段 (识别今日/昨日开盘)", group="成交量分布设置", tooltip="美盘期货(NQ/ES): NY时区设 0930-1600；若按BJ时区设 2130-0400")
+vp_custom_time = input.time(timestamp("2026-10-01T09:30:00-05:00"), title="任意 K 线起始时间", group="成交量分布设置", tooltip="选择具体的日期和时间；该时间点及之后的 K 线会纳入计算")
+poc_ticks      = input.int(5, title="POC 价格精度 (Ticks/步长)", minval=1, group="成交量分布设置")
 
 // --- 跨周期 EMA 核心参数 (PAIO 高周期 EMA20 移植) ---
 show_emas    = input.bool(true,  title="显示 跨周期 EMA", group="EMA 设置")
@@ -91,6 +95,39 @@ render_level(l_id, lbl_id, val, col, width, txt, is_enabled) =>
         line.set_color(l_id, color.new(color.white, 100))
         label.set_textcolor(lbl_id, color.new(color.white, 100))
 
+// 将一个 5 分钟 K 线的 OHLC 按 price bucket 累加到成交量分布数组。
+// 每个 K 线拆成 O/H/L/C 四个采样点，各点分配 volume / 4。
+f_add_volume_profile_bar(_prices, _vols, _step) =>
+    float _v_part = volume / 4.0
+    float _p_o = math.round(open  / _step) * _step
+    float _p_h = math.round(high  / _step) * _step
+    float _p_l = math.round(low   / _step) * _step
+    float _p_c = math.round(close / _step) * _step
+
+    array<float> _pts = array.new_float(4)
+    array.set(_pts, 0, _p_o)
+    array.set(_pts, 1, _p_h)
+    array.set(_pts, 2, _p_l)
+    array.set(_pts, 3, _p_c)
+
+    for _i = 0 to 3
+        float _pt = array.get(_pts, _i)
+        int _idx  = array.indexof(_prices, _pt)
+        if _idx != -1
+            array.set(_vols, _idx, array.get(_vols, _idx) + _v_part)
+        else
+            array.push(_prices, _pt)
+            array.push(_vols, _v_part)
+
+// 返回成交量分布中成交量最大的价格层级（简化版 POC）。
+f_profile_poc(_prices, _vols) =>
+    float _poc = na
+    if array.size(_vols) > 0
+        int _m_idx = array.indexof(_vols, array.max(_vols))
+        if _m_idx != -1
+            _poc := array.get(_prices, _m_idx)
+    _poc
+
 // ==========================================
 // 3. 全时段 (ETH) 跨域数据提取算法
 // ==========================================
@@ -101,8 +138,8 @@ ext_symbol = ticker.new(syminfo.prefix, syminfo.ticker, session.extended)
 [w_o, w_h, w_l, w_c] = request.security(ext_symbol, "W", [open[1], high[1], low[1], close[1]], gaps = barmerge.gaps_off)
 [m_o, m_h, m_l, m_c] = request.security(ext_symbol, "M", [open[1], high[1], low[1], close[1]], gaps = barmerge.gaps_off)
 
-// --- B. 夜盘与 POC 强行基于 5 分钟 ETH 数据流计算（避开 RTH 裁剪） ---
-f_calc_intraday_levels(_night_sess, _us_sess, _poc_ticks, _tz) =>
+// --- B. 夜盘与成交量分布强行基于 5 分钟 ETH 数据流计算（避开 RTH 裁剪） ---
+f_calc_intraday_levels(_night_sess, _day_sess, _custom_start, _poc_ticks, _tz) =>
     // 强制指定 5 分钟采样粒度，保证 24 小时全覆盖
     string _calc_tf = "5"
 
@@ -129,56 +166,43 @@ f_calc_intraday_levels(_night_sess, _us_sess, _poc_ticks, _tz) =>
     float _out_nh = _in_night ? _live_nh : _last_completed_nh
     float _out_nl = _in_night ? _live_nl : _last_completed_nl
 
-    // 2. 美盘 POC 计算 (Volume Profile 简化算法)
-    _in_us = not na(time(_calc_tf, _us_sess, _tz))
-    var float _live_poc = na
-    var float _last_completed_poc = na
-    var array<float> _prices = array.new_float(0)
-    var array<float> _vols   = array.new_float(0)
+    // 2. 三种成交量分布区间（Volume Profile 简化算法）
+    _in_day = not na(time(_calc_tf, _day_sess, _tz))
+    _is_new_day = _in_day and not _in_day[1]
 
-    if _in_us
-        if not _in_us[1] // 新美盘开盘，重置容器
-            _prices := array.new_float(0)
-            _vols   := array.new_float(0)
-            _live_poc := na
+    var array<float> _prev_prices = array.new_float(0)
+    var array<float> _prev_vols   = array.new_float(0)
+    var array<float> _today_prices = array.new_float(0)
+    var array<float> _today_vols   = array.new_float(0)
+    var array<float> _custom_prices = array.new_float(0)
+    var array<float> _custom_vols   = array.new_float(0)
+    var bool _day_seen = false
 
-        float _v_part = volume / 4.0
-        float _step   = syminfo.mintick * _poc_ticks
-        float _p_o = math.round(open  / _step) * _step
-        float _p_h = math.round(high  / _step) * _step
-        float _p_l = math.round(low   / _step) * _step
-        float _p_c = math.round(close / _step) * _step
+    if _is_new_day
+        // 新日盘开盘：把已完成的本日数组转存为“昨日开盘”数组，再重置“今日开盘”数组
+        _prev_prices := array.copy(_today_prices)
+        _prev_vols   := array.copy(_today_vols)
+        _today_prices := array.new_float(0)
+        _today_vols   := array.new_float(0)
+        _day_seen := true
 
-        array<float> _pts = array.new_float(4)
-        array.set(_pts, 0, _p_o)
-        array.set(_pts, 1, _p_h)
-        array.set(_pts, 2, _p_l)
-        array.set(_pts, 3, _p_c)
+    float _step = syminfo.mintick * _poc_ticks
 
-        for _i = 0 to 3
-            float _pt = array.get(_pts, _i)
-            int _idx  = array.indexof(_prices, _pt)
-            if _idx != -1
-                array.set(_vols, _idx, array.get(_vols, _idx) + _v_part)
-            else
-                array.push(_prices, _pt)
-                array.push(_vols, _v_part)
+    if _day_seen
+        f_add_volume_profile_bar(_today_prices, _today_vols, _step)
+        f_add_volume_profile_bar(_prev_prices, _prev_vols, _step)
 
-        if array.size(_vols) > 0
-            int _m_idx = array.indexof(_vols, array.max(_vols))
-            if _m_idx != -1
-                _live_poc := array.get(_prices, _m_idx)
-    else if _in_us[1] // 美盘收盘（16:00）
-        if not na(_live_poc)
-            _last_completed_poc := _live_poc
+    if time >= _custom_start
+        f_add_volume_profile_bar(_custom_prices, _custom_vols, _step)
 
-    // 输出已结算的美盘 POC
-    float _out_poc = nz(_last_completed_poc, _live_poc)
+    float _out_vp_prev   = f_profile_poc(_prev_prices, _prev_vols)
+    float _out_vp_today  = f_profile_poc(_today_prices, _today_vols)
+    float _out_vp_custom = f_profile_poc(_custom_prices, _custom_vols)
 
-    [_out_nh, _out_nl, _out_poc]
+    [_out_nh, _out_nl, _out_vp_prev, _out_vp_today, _out_vp_custom]
 
 // 跨域使用 "5" 分钟全时段 (ETH) 抓取数据
-[night_h, night_l, last_us_poc] = request.security(ext_symbol, "5", f_calc_intraday_levels(night_sess, us_sess, poc_ticks, tz_string), gaps = barmerge.gaps_off)
+[night_h, night_l, vp_prev_poc, vp_today_poc, vp_custom_poc] = request.security(ext_symbol, "5", f_calc_intraday_levels(night_sess, vp_day_sess, vp_custom_time, poc_ticks, tz_string), gaps = barmerge.gaps_off)
 
 // 历史最高价
 ath = ta.highest(high, bar_index + 1)
@@ -203,7 +227,9 @@ var l_mc = line.new(na,na,na,na), var lbl_mc = label.new(na,na,"")
 
 var l_nh  = line.new(na,na,na,na), var lbl_nh  = label.new(na,na,"")
 var l_nl  = line.new(na,na,na,na), var lbl_nl  = label.new(na,na,"")
-var l_poc = line.new(na,na,na,na), var lbl_poc = label.new(na,na,"")
+var l_vp_prev   = line.new(na,na,na,na), var lbl_vp_prev   = label.new(na,na,"")
+var l_vp_today  = line.new(na,na,na,na), var lbl_vp_today  = label.new(na,na,"")
+var l_vp_custom = line.new(na,na,na,na), var lbl_vp_custom = label.new(na,na,"")
 var l_ath = line.new(na,na,na,na), var lbl_ath = label.new(na,na,"")
 
 render_level(l_yo, lbl_yo, y_o, color.new(#b2b5be, 40), 1, "日开", show_d)
@@ -223,7 +249,9 @@ render_level(l_mc, lbl_mc, m_c, color.new(#2979ff, 0),  2, "月收", show_m)
 
 render_level(l_nh,  lbl_nh,  night_h,     color.new(#ff4081, 0), 1, "夜高", show_night)
 render_level(l_nl,  lbl_nl,  night_l,     color.new(#69f0ae, 0), 1, "夜低", show_night)
-render_level(l_poc, lbl_poc, last_us_poc, color.new(#ffd600, 0), 2, "美POC", show_us_poc)
+render_level(l_vp_prev,   lbl_vp_prev,   vp_prev_poc,   color.new(#ffb300, 0), 2, "昨开POC", show_vp_prev)
+render_level(l_vp_today,  lbl_vp_today,  vp_today_poc,  color.new(#ffd600, 0), 3, "今开POC", show_vp_today)
+render_level(l_vp_custom, lbl_vp_custom, vp_custom_poc, color.new(#00e5ff, 0), 2, "自定义POC", show_vp_custom)
 
 render_level(l_ath, lbl_ath, ath, color.new(#ffd600, 0), 3, "★ ATH", show_ath)
 
