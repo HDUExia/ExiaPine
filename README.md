@@ -7,6 +7,7 @@ TradingView Pine Script，由 `PAQuant 自营图表 Fork v13.0` 重命名而来�
 - 主图叠加显示日/周/月级别的开盘、最高、最低、收盘关键位。
 - 支持夜盘高低点、历史最高价（ATH）。
 - 成交量分布支持三种可勾选区间：昨日开盘 → 当前 K 线、今日开盘 → 当前 K 线、任意时间 → 当前 K 线；每个区间输出 POC、70% VAH、70% VAL，并以折线形式绘制在每根 K 线上。其中 POC 为实线，VAH 为阶梯线，VAL 为圆点标记。
+- 最新 K 线右侧会显示 `昨开POC`、`昨开VAH`、`昨开VAL` 等中文价格标签。
 - 提供本周期、15 分钟、60 分钟三档 EMA20 跨周期叠加。
 - 副图显示 Standard ATR、Bull ATR、Bear ATR。
 - 默认时区为 `America/New_York`，可在设置面板中切换。
@@ -94,6 +95,17 @@ render_level(l_id, lbl_id, val, col, width, txt, is_enabled) =>
         label.set_textalign(lbl_id, text.align_left)
     else
         line.set_color(l_id, color.new(color.white, 100))
+        label.set_textcolor(lbl_id, color.new(color.white, 100))
+
+// 仅用于成交量分布折线：在最新 K 线右侧放置中文价格标签。
+render_vp_label(lbl_id, val, col, txt, is_enabled, x_offset) =>
+    if is_enabled and not na(val) and barstate.islast
+        label.set_xy(lbl_id, bar_index + x_offset, val)
+        label.set_text(lbl_id, txt + " " + str.tostring(val, format.mintick))
+        label.set_textcolor(lbl_id, col)
+        label.set_style(lbl_id, label.style_none)
+        label.set_textalign(lbl_id, text.align_left)
+    else
         label.set_textcolor(lbl_id, color.new(color.white, 100))
 
 // 将一个 5 分钟 K 线的 OHLC 按 price bucket 累加到成交量分布数组。
@@ -271,6 +283,15 @@ var l_mc = line.new(na,na,na,na), var lbl_mc = label.new(na,na,"")
 
 var l_nh  = line.new(na,na,na,na), var lbl_nh  = label.new(na,na,"")
 var l_nl  = line.new(na,na,na,na), var lbl_nl  = label.new(na,na,"")
+var lbl_vp_prev_poc = label.new(na,na,"")
+var lbl_vp_prev_vah = label.new(na,na,"")
+var lbl_vp_prev_val = label.new(na,na,"")
+var lbl_vp_today_poc = label.new(na,na,"")
+var lbl_vp_today_vah = label.new(na,na,"")
+var lbl_vp_today_val = label.new(na,na,"")
+var lbl_vp_custom_poc = label.new(na,na,"")
+var lbl_vp_custom_vah = label.new(na,na,"")
+var lbl_vp_custom_val = label.new(na,na,"")
 var l_ath = line.new(na,na,na,na), var lbl_ath = label.new(na,na,"")
 
 render_level(l_yo, lbl_yo, y_o, color.new(#b2b5be, 40), 1, "日开", show_d)
@@ -299,6 +320,16 @@ plot(series = show_vp_today ? vp_today_val : na, title = "今开VAL", color = co
 plot(series = show_vp_custom ? vp_custom_poc : na, title = "自定义POC", color = color.new(#00e5ff, 0), linewidth = 3, style = plot.style_line)
 plot(series = show_vp_custom ? vp_custom_vah : na, title = "自定义VAH", color = color.new(#00e5ff, 0), linewidth = 2, style = plot.style_stepline)
 plot(series = show_vp_custom ? vp_custom_val : na, title = "自定义VAL", color = color.new(#00e5ff, 0), linewidth = 2, style = plot.style_circles)
+
+render_vp_label(lbl_vp_prev_poc, vp_prev_poc, color.new(#ffb300, 0), "昨开POC", show_vp_prev, 1)
+render_vp_label(lbl_vp_prev_vah, vp_prev_vah, color.new(#ffb300, 0), "昨开VAH", show_vp_prev, 3)
+render_vp_label(lbl_vp_prev_val, vp_prev_val, color.new(#ffb300, 0), "昨开VAL", show_vp_prev, 5)
+render_vp_label(lbl_vp_today_poc, vp_today_poc, color.new(#ffd600, 0), "今开POC", show_vp_today, 1)
+render_vp_label(lbl_vp_today_vah, vp_today_vah, color.new(#ffd600, 0), "今开VAH", show_vp_today, 3)
+render_vp_label(lbl_vp_today_val, vp_today_val, color.new(#ffd600, 0), "今开VAL", show_vp_today, 5)
+render_vp_label(lbl_vp_custom_poc, vp_custom_poc, color.new(#00e5ff, 0), "自定义POC", show_vp_custom, 1)
+render_vp_label(lbl_vp_custom_vah, vp_custom_vah, color.new(#00e5ff, 0), "自定义VAH", show_vp_custom, 3)
+render_vp_label(lbl_vp_custom_val, vp_custom_val, color.new(#00e5ff, 0), "自定义VAL", show_vp_custom, 5)
 
 render_level(l_ath, lbl_ath, ath, color.new(#ffd600, 0), 3, "★ ATH", show_ath)
 
