@@ -17,7 +17,7 @@ TradingView Pine Script，由 `PAQuant 自营图表 Fork v13.0` 重命名而来�
 
 ```pine
 //@version=6
-indicator("ExiaPine", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+indicator("ExiaPine", overlay = true, max_boxes_count = 200, max_lines_count = 400, max_labels_count = 400, calc_bars_count = 2000)
 
 // ==========================================
 // Forked from: PAQuant 自营图表 (时间戳无缝对齐·绝不压扁·夜盘美POC完整版) v12.0
@@ -115,7 +115,7 @@ render_level(l_id, lbl_id, val, col, width, txt, is_enabled) =>
         label.set_textcolor(lbl_id, color.new(color.white, 100))
 
 // 仅用于成交量分布折线：在最新 K 线右侧放置中文价格标签。
-render_vp_label(lbl_id, val, col, txt, is_enabled, x_offset) =>
+render_vp_label(lbl_id, series float val, col, txt, is_enabled, x_offset) =>
     if is_enabled and not na(val) and barstate.islast
         label.set_xy(lbl_id, bar_index + x_offset, val)
         label.set_text(lbl_id, txt + " " + str.tostring(val, format.mintick))
@@ -235,7 +235,7 @@ f_calc_night_levels(_night_sess, _tz) =>
     [_out_nh, _out_nl]
 
 // --- C. 三种成交量分布区间（POC / VAH / VAL） ---
-f_calc_volume_profiles(_day_sess, _custom_start, _poc_ticks, _va_pct, _tz) =>
+f_calc_volume_profiles(_day_sess, _custom_start, _poc_ticks, _va_pct, _tz, _use_prev, _use_today, _use_custom) =>
     string _calc_tf = "5"
 
     _in_day = not na(time(_calc_tf, _day_sess, _tz))
@@ -251,31 +251,51 @@ f_calc_volume_profiles(_day_sess, _custom_start, _poc_ticks, _va_pct, _tz) =>
 
     if _is_new_day
         // 新日盘开盘：把已完成的本日数组转存为“昨日开盘”数组，再重置“今日开盘”数组
-        _prev_prices := array.copy(_today_prices)
-        _prev_vols   := array.copy(_today_vols)
-        _today_prices := array.new_float(0)
-        _today_vols   := array.new_float(0)
+        if _use_prev
+            _prev_prices := array.copy(_today_prices)
+            _prev_vols   := array.copy(_today_vols)
+        if _use_today
+            _today_prices := array.new_float(0)
+            _today_vols   := array.new_float(0)
         _day_seen := true
 
     float _step = syminfo.mintick * _poc_ticks
 
     if _day_seen
-        f_add_volume_profile_bar(_today_prices, _today_vols, _step)
-        f_add_volume_profile_bar(_prev_prices, _prev_vols, _step)
+        if _use_today
+            f_add_volume_profile_bar(_today_prices, _today_vols, _step)
+        if _use_prev
+            f_add_volume_profile_bar(_prev_prices, _prev_vols, _step)
 
-    if time >= _custom_start
+    if _use_custom and time >= _custom_start
         f_add_volume_profile_bar(_custom_prices, _custom_vols, _step)
 
-    [_prev_poc, _prev_vah, _prev_val]       = f_profile_levels(_prev_prices, _prev_vols, _va_pct)
-    [_today_poc, _today_vah, _today_val]    = f_profile_levels(_today_prices, _today_vols, _va_pct)
-    [_custom_poc, _custom_vah, _custom_val] = f_profile_levels(_custom_prices, _custom_vols, _va_pct)
+    float _prev_poc = na, float _prev_vah = na, float _prev_val = na
+    float _today_poc = na, float _today_vah = na, float _today_val = na
+    float _custom_poc = na, float _custom_vah = na, float _custom_val = na
+
+    if _use_prev
+        [_p1, _v1, _l1] = f_profile_levels(_prev_prices, _prev_vols, _va_pct)
+        _prev_poc := _p1
+        _prev_vah := _v1
+        _prev_val := _l1
+    if _use_today
+        [_p2, _v2, _l2] = f_profile_levels(_today_prices, _today_vols, _va_pct)
+        _today_poc := _p2
+        _today_vah := _v2
+        _today_val := _l2
+    if _use_custom
+        [_p3, _v3, _l3] = f_profile_levels(_custom_prices, _custom_vols, _va_pct)
+        _custom_poc := _p3
+        _custom_vah := _v3
+        _custom_val := _l3
 
     [_prev_poc, _prev_vah, _prev_val, _today_poc, _today_vah, _today_val, _custom_poc, _custom_vah, _custom_val]
 
 // 跨域使用 "5" 分钟全时段 (ETH) 抓取数据
 [night_h, night_l] = request.security(ext_symbol, "5", f_calc_night_levels(night_sess, tz_string), gaps = barmerge.gaps_off)
 
-[vp_prev_poc, vp_prev_vah, vp_prev_val, vp_today_poc, vp_today_vah, vp_today_val, vp_custom_poc, vp_custom_vah, vp_custom_val] = request.security(ext_symbol, "5", f_calc_volume_profiles(vp_day_sess, vp_custom_time, poc_ticks, vp_va_pct, tz_string), gaps = barmerge.gaps_off)
+[vp_prev_poc, vp_prev_vah, vp_prev_val, vp_today_poc, vp_today_vah, vp_today_val, vp_custom_poc, vp_custom_vah, vp_custom_val] = request.security(ext_symbol, "5", f_calc_volume_profiles(vp_day_sess, vp_custom_time, poc_ticks, vp_va_pct, tz_string, show_vp_prev, show_vp_today, show_vp_custom), gaps = barmerge.gaps_off)
 
 // 历史最高价
 ath = ta.highest(high, bar_index + 1)
