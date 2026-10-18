@@ -384,14 +384,16 @@ plot(show_atr ? final_BearATR : na, title="Bear ATR",     color=color.new(#ff525
 // 7. 缺口系列 (Gap Series，移植自 PAIO + 回补变色)
 // ==========================================
 var array<box> _gap_fill_boxes = array.new<box>()
+var array<box> _gap_boxes = array.new<box>()
 var array<int> _gap_dirs = array.new<int>()
 var array<float> _gap_top_limits = array.new<float>()
 var array<float> _gap_bottom_limits = array.new<float>()
 
-f_add_gap(_boxes, _dirs, _top_limits, _bottom_limits, left, top, right, bottom, bgcolor, fillcolor, dir, entry_top, entry_bottom) =>
-    box.new(left, top, right, bottom, border_width = 0, bgcolor = bgcolor)
+f_add_gap(_boxes, _fill_boxes, _dirs, _top_limits, _bottom_limits, left, top, right, bottom, bgcolor, fillcolor, dir, entry_top, entry_bottom) =>
+    box _orig_box = box.new(left, top, right, bottom, border_width = 0, bgcolor = bgcolor)
     box _fill_box = box.new(left, entry_top, right, entry_bottom, border_width = 0, bgcolor = fillcolor)
-    array.push(_boxes, _fill_box)
+    array.push(_boxes, _orig_box)
+    array.push(_fill_boxes, _fill_box)
     array.push(_dirs, dir)
     array.push(_top_limits, top)
     array.push(_bottom_limits, bottom)
@@ -401,22 +403,22 @@ bool gs_open_d_alert = false
 if low > high[1]
     gs_open_u_alert := true
     if gs_use and gs_open_use
-        f_add_gap(_gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[1], low, bar_index, high[1], gs_open_u_color, gs_fill_color, 1, low, low)
+        f_add_gap(_gap_boxes, _gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[1], low, bar_index, high[1], gs_open_u_color, gs_fill_color, 1, low, low)
 else if high < low[1]
     gs_open_d_alert := true
     if gs_use and gs_open_use
-        f_add_gap(_gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[1], low[1], bar_index, high, gs_open_d_color, gs_fill_color, -1, high, high)
+        f_add_gap(_gap_boxes, _gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[1], low[1], bar_index, high, gs_open_d_color, gs_fill_color, -1, high, high)
 
 bool gs_wick_u_alert = false
 bool gs_wick_d_alert = false
 if low > high[2]
     gs_wick_u_alert := true
     if gs_use and gs_wick_use and ((gs_wick_except_open and not gs_open_u_alert and not gs_open_u_alert[1]) or not gs_wick_except_open)
-        f_add_gap(_gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], low, bar_index, high[2], gs_wick_u_color, gs_fill_color, 1, low, low)
+        f_add_gap(_gap_boxes, _gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], low, bar_index, high[2], gs_wick_u_color, gs_fill_color, 1, low, low)
 else if high < low[2]
     gs_wick_d_alert := true
     if gs_use and gs_wick_use and ((gs_wick_except_open and not gs_open_d_alert and not gs_open_d_alert[1]) or not gs_wick_except_open)
-        f_add_gap(_gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], low[2], bar_index, high, gs_wick_d_color, gs_fill_color, -1, high, high)
+        f_add_gap(_gap_boxes, _gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], low[2], bar_index, high, gs_wick_d_color, gs_fill_color, -1, high, high)
 
 float gs_body_high = math.max(open, close)
 float gs_body_low  = math.min(open, close)
@@ -425,25 +427,42 @@ bool gs_body_d_alert = false
 if gs_body_low > gs_body_high[2]
     gs_body_u_alert := true
     if gs_use and gs_body_use and ((gs_body_except_open and not gs_open_u_alert and not gs_open_u_alert[1]) or not gs_body_except_open) and ((gs_body_except_wick and not gs_wick_u_alert) or not gs_body_except_wick)
-        f_add_gap(_gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], gs_body_high[2], bar_index, gs_body_low, gs_body_u_color, gs_fill_color, 1, gs_body_low, gs_body_low)
+        f_add_gap(_gap_boxes, _gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], gs_body_high[2], bar_index, gs_body_low, gs_body_u_color, gs_fill_color, 1, gs_body_low, gs_body_low)
 else if gs_body_high < gs_body_low[2]
     gs_body_d_alert := true
     if gs_use and gs_body_use and ((gs_body_except_open and not gs_wick_d_alert and not gs_open_d_alert) or not gs_body_except_open) and ((gs_body_except_wick and not gs_open_d_alert[1]) or not gs_body_except_wick)
-        f_add_gap(_gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], gs_body_low[2], bar_index, gs_body_high, gs_body_d_color, gs_fill_color, -1, gs_body_high, gs_body_high)
+        f_add_gap(_gap_boxes, _gap_fill_boxes, _gap_dirs, _gap_top_limits, _gap_bottom_limits, bar_index[2], gs_body_low[2], bar_index, gs_body_high, gs_body_d_color, gs_fill_color, -1, gs_body_high, gs_body_high)
 
 if array.size(_gap_fill_boxes) > 0
-    for _i = 0 to array.size(_gap_fill_boxes) - 1
-        box _b = array.get(_gap_fill_boxes, _i)
-        int _dir = array.get(_gap_dirs, _i)
-        float _top_limit = array.get(_gap_top_limits, _i)
-        float _bottom_limit = array.get(_gap_bottom_limits, _i)
+    int _gi = 0
+    while _gi < array.size(_gap_fill_boxes)
+        box _orig_box = array.get(_gap_boxes, _gi)
+        box _fill_box = array.get(_gap_fill_boxes, _gi)
+        int _dir = array.get(_gap_dirs, _gi)
+        float _top_limit = array.get(_gap_top_limits, _gi)
+        float _bottom_limit = array.get(_gap_bottom_limits, _gi)
+        bool _fully_filled = false
+
         if _dir > 0
-            float _filled_bottom = box.get_bottom(_b)
+            float _filled_bottom = box.get_bottom(_fill_box)
             _filled_bottom := math.min(_filled_bottom, low)
             _filled_bottom := math.max(_filled_bottom, _bottom_limit)
-            box.set_bottom(_b, _filled_bottom)
+            box.set_bottom(_fill_box, _filled_bottom)
+            _fully_filled := _filled_bottom <= _bottom_limit
         else
-            float _filled_top = box.get_top(_b)
+            float _filled_top = box.get_top(_fill_box)
             _filled_top := math.max(_filled_top, high)
             _filled_top := math.min(_filled_top, _top_limit)
-            box.set_top(_b, _filled_top)
+            box.set_top(_fill_box, _filled_top)
+            _fully_filled := _filled_top >= _top_limit
+
+        if _fully_filled
+            box.delete(_orig_box)
+            box.delete(_fill_box)
+            array.remove(_gap_boxes, _gi)
+            array.remove(_gap_fill_boxes, _gi)
+            array.remove(_gap_dirs, _gi)
+            array.remove(_gap_top_limits, _gi)
+            array.remove(_gap_bottom_limits, _gi)
+        else
+            _gi += 1
